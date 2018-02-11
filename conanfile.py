@@ -4,9 +4,9 @@ from conans import ConanFile, CMake, tools
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
     version = "1.0.0"
-    license = "BSD-2"
-    url = "<Package recipe repository url here, for issues about the package>"
-    description = "QuickCheck clone for C++ with the goal of being simple to use with as little boilerplate as possible."
+    license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
+    url = "https://github.com/objectx/rapidcheck-conan"
+    description = "Please visit https://github.com/emil-e/rapidcheck"
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False]}
     default_options = "shared=False"
@@ -25,10 +25,6 @@ conan_basic_setup()''')
         cmake = CMake(self)
         cmake.configure(source_folder="rapidcheck")
         cmake.build()
-
-        # Explicit way:
-        # self.run('cmake %s/hello %s' % (self.source_folder, cmake.command_line))
-        # self.run("cmake --build . %s" % cmake.build_config)
 
     def package(self):
         self.copy("LICENSE*", dst="licenses", src="rapidcheck")
