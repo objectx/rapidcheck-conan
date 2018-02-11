@@ -31,6 +31,7 @@ conan_basic_setup()''')
         # self.run("cmake --build . %s" % cmake.build_config)
 
     def package(self):
+        self.copy("LICENSE*", dst="licenses", src="rapidcheck")
         self.copy("*.h", dst="include", src="rapidcheck/include")
         self.copy("*.hpp", dst="include", src="rapidcheck/include")
         self.copy("*rapidcheck.lib", dst="lib", keep_path=False)
@@ -40,4 +41,4 @@ conan_basic_setup()''')
         self.copy("*.a", dst="lib", keep_path=False)
 
     def package_info(self):
-        self.cpp_info.libs = ["rapidcheck"]
+        self.cpp_info.libs = tools.collect_libs(self)
