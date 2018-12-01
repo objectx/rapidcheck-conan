@@ -1,20 +1,32 @@
 from conans import ConanFile, CMake, tools
-
+import sys
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.2"
+    version = "1.0.3"
     license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
     url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
     settings = "os", "compiler", "build_type", "arch"
-    options = {"shared": [True, False]}
-    default_options = "shared=False"
+    options = {"shared": [True, False],
+               "enable_all_extras": [True, False],
+               "enable_catch": [True, False],
+               "enable_gmock": [True, False],
+               "enable_gtest": [True, False],
+               "enable_boost": [True, False],
+               "enable_boost_test": [True, False]}
+    default_options = {"shared" : False,
+                       "enable_all_extras": False,
+                       "enable_catch": False,
+                       "enable_gmock": False,
+                       "enable_gtest": False,
+                       "enable_boost": False,
+                       "enable_boost_test": False}
     generators = "cmake"
 
     def source(self):
         self.run("git clone https://github.com/emil-e/rapidcheck.git")
-        self.run("cd rapidcheck && git checkout master")
+        self.run("cd rapidcheck && git checkout --detach dd547905d8a40e22814c03202cf91be02e6deb73")
         # This small hack might be useful to guarantee proper /MT /MD linkage in MSVC
         # if the packaged project doesn't have variables to set it properly
         tools.replace_in_file("rapidcheck/CMakeLists.txt", "project(rapidcheck CXX)", '''project(rapidcheck CXX)
@@ -23,7 +35,21 @@ conan_basic_setup()''')
 
     def build(self):
         cmake = CMake(self)
-        cmake.configure(source_folder="rapidcheck")
+        defs = dict()
+        if self.options.enable_all_extras:
+            defs["RC_INSTALL_ALL_EXTRAS"] = "YES"
+        else:
+            if self.options.enable_catch:
+                defs["RC_ENABLE_CATCH"] = "YES"
+            if self.options.enable_gmock:
+                defs["RC_ENABLE_GMOCK"] = "YES"
+            if self.options.enable_gtest:
+                defs["RC_ENABLE_GTEST"] = "YES"
+            if self.options.enable_boost:
+                defs["RC_ENABLE_BOOST"] = "YES"
+            if self.options.enable_boost_test:
+                defs["RC_ENABLE_BOOST_TEST"] = "YES"
+        cmake.configure(source_folder="rapidcheck", defs=defs)
         cmake.build()
 
     def package(self):
