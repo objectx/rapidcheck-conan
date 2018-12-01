@@ -3,7 +3,7 @@ from conans import ConanFile, CMake, tools
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.1"
+    version = "1.0.2"
     license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
     url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
