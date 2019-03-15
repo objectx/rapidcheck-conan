@@ -3,7 +3,7 @@ import sys
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.3"
+    version = "1.0.4"
     license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
     url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
@@ -26,7 +26,7 @@ class RapidcheckConan(ConanFile):
 
     def source(self):
         self.run("git clone https://github.com/emil-e/rapidcheck.git")
-        self.run("cd rapidcheck && git checkout --detach dd547905d8a40e22814c03202cf91be02e6deb73")
+        self.run("cd rapidcheck && git checkout --detach 3eb9b4ff69f4ff2d9932e8f852c2b2a61d7c20d3")
         # This small hack might be useful to guarantee proper /MT /MD linkage in MSVC
         # if the packaged project doesn't have variables to set it properly
         tools.replace_in_file("rapidcheck/CMakeLists.txt", "project(rapidcheck CXX)", '''project(rapidcheck CXX)
@@ -57,8 +57,10 @@ conan_basic_setup()''')
         self.copy("*.h", dst="include", src="rapidcheck/include")
         self.copy("*.hpp", dst="include", src="rapidcheck/include")
         for e in ["catch", "gmock", "gtest", "boost", "boost_test"]:
-            self.copy("*.h", dst="include", src=("rapidcheck/extras/%s/include" % e))
-            self.copy("*.hpp", dst="include", src=("rapidcheck/extras/%s/include" % e))
+            f = f"rapidcheck/extras/{e}/include"
+            print("f =", f, file=sys.stderr)
+            self.copy("*.h", dst="include", src=f)
+            self.copy("*.hpp", dst="include", src=f)
         self.copy("*rapidcheck.lib", dst="lib", keep_path=False)
         self.copy("*.dll", dst="bin", keep_path=False)
         self.copy("*.so", dst="lib", keep_path=False)
