@@ -15,10 +15,29 @@ let profile = "clang-8"
 
 let buildRoot = __SOURCE_DIRECTORY__ </> "B"
 
+Target.create "EnsureBuildRoot" <| fun _ ->
+    Directory.ensure buildRoot
+    let tagFile = buildRoot </> ".BUILDDIR.TAG"
+    use f = System.IO.File.CreateText(tagFile)
+    f.WriteLine("build-dir: 19BBC6F7-3FBF-49BD-BAA4-EA60CE5A0735")
+    f.WriteLine("# Tag for `restic`")
+
 let srcDir = buildRoot </> "source"
 
 Target.create "Clean" <| fun _ ->
-    buildRoot |> Directory.delete
+    let extensions = [".oldest"; ".older"; ".old"; ""]
+    extensions
+    |> Seq.pairwise
+    |> Seq.iter
+        (fun (dst, src) ->
+            let dstDir = buildRoot + dst
+            let srcDir = buildRoot + src
+            if System.IO.Directory.Exists (dstDir) then
+                Trace.logfn "# delete %s" dstDir
+                dstDir |> Directory.delete
+            if System.IO.Directory.Exists (srcDir) then
+                Trace.logfn "# rename %s -> %s" srcDir dstDir
+                System.IO.Directory.Move(srcDir, dstDir))
 
 Target.create "Source" <| fun _ ->
     srcDir |> Directory.ensure
@@ -31,6 +50,10 @@ Target.create "Source" <| fun _ ->
     |> CreateProcess.ensureExitCode
     |> Proc.run
     |> ignore
+
+"Clean"
+    ==> "EnsureBuildRoot"
+    ==> "Source"
 
 let createTargets prof =
     let targetName x = sprintf "%s-%s" x prof
@@ -112,7 +135,8 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    (targetName "Install")
+    "Source"
+        ==> (targetName "Install")
         ==> (targetName "Build")
         ==> (targetName "Package")
         ==> (targetName "Export")
@@ -125,6 +149,7 @@ Target.create "Export" ignore
 Target.create "Test" ignore
 Target.create "Create" ignore
 
+createTargets "default"
 createTargets "clang-8"
 createTargets "gcc-9"
 
