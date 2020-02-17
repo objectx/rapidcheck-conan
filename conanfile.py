@@ -3,7 +3,7 @@ import sys
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.5"
+    version = "1.0.6"
     license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
     url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
@@ -26,7 +26,7 @@ class RapidcheckConan(ConanFile):
 
     def source(self):
         self.run("git clone https://github.com/emil-e/rapidcheck.git")
-        self.run("cd rapidcheck && git checkout --detach d9482c683429fe79122e3dcab14c9655874aeb8e")
+        self.run("cd rapidcheck && git checkout --detach 258d907da00a0855f92c963d8f76eef115531716")
         # This small hack might be useful to guarantee proper /MT /MD linkage in MSVC
         # if the packaged project doesn't have variables to set it properly
         tools.replace_in_file("rapidcheck/CMakeLists.txt", "project(rapidcheck CXX)", '''project(rapidcheck CXX)

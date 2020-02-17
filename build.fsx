@@ -11,7 +11,7 @@ open BlackFox.CommandLine
 
 Target.initEnvironment()
 
-let profile = "clang-8"
+let profile = "clang-9"
 
 let buildRoot = __SOURCE_DIRECTORY__ </> "B"
 
@@ -115,7 +115,7 @@ let createTargets prof =
         CmdLine.empty
         |> CmdLine.append "test"
         |> CmdLine.append (__SOURCE_DIRECTORY__ </> "test_package")
-        |> CmdLine.append "rapidcheck/1.0.5@objectx/testing"
+        |> CmdLine.append "rapidcheck/1.0.6@objectx/testing"
         |> CmdLine.appendPrefix "--profile" prof
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
@@ -150,7 +150,7 @@ Target.create "Test" ignore
 Target.create "Create" ignore
 
 createTargets "default"
-createTargets "clang-8"
+createTargets "clang-9"
 createTargets "gcc-9"
 
 Target.runOrList()
