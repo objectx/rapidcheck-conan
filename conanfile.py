@@ -3,12 +3,13 @@ import sys
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.6"
+    version = "1.0.7"
     license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
     url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
     settings = "os", "compiler", "build_type", "arch"
     options = {"shared": [True, False],
+               "enable_rtti": [True, False],
                "enable_all_extras": [True, False],
                "enable_catch": [True, False],
                "enable_gmock": [True, False],
@@ -16,6 +17,7 @@ class RapidcheckConan(ConanFile):
                "enable_boost": [True, False],
                "enable_boost_test": [True, False]}
     default_options = {"shared" : False,
+                       "enable_rtti": True,
                        "enable_all_extras": False,
                        "enable_catch": False,
                        "enable_gmock": False,
@@ -49,6 +51,8 @@ conan_basic_setup()''')
                 defs["RC_ENABLE_BOOST"] = "YES"
             if self.options.enable_boost_test:
                 defs["RC_ENABLE_BOOST_TEST"] = "YES"
+        if self.options.enable_rtti:
+            defs["RC_ENABLE_RTTI"] = "YES"
         cmake.configure(source_folder="rapidcheck", defs=defs)
         cmake.build()
 
@@ -69,3 +73,5 @@ conan_basic_setup()''')
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
+        if self.options.enable_rtti:
+            self.cpp_info.defines.append ("RC_USE_RTTI=1")

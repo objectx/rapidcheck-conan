@@ -1,6 +1,13 @@
-#r "paket: groupref Fake //"
+#r "paket:
+    nuget FSharp.Core ~> 4 prerelease
+    nuget Fake.Core.Target ~> 5 prerelease
+    nuget BlackFox.CommandLine ~> 1 prerelease
+    nuget BlackFox.Fake.BuildTask
+//"
 
+#if !FAKE
 #load ".fake/build.fsx/intellisense.fsx"
+#endif
 
 open Fake.Core
 open Fake.Core.TargetOperators
@@ -8,23 +15,16 @@ open Fake.IO
 open Fake.IO.FileSystemOperators
 open Fake.IO.Globbing.Operators
 open BlackFox.CommandLine
+open BlackFox.Fake
 
 Target.initEnvironment()
 
 let profile = "clang-9"
 
 let buildRoot = __SOURCE_DIRECTORY__ </> "B"
-
-Target.create "EnsureBuildRoot" <| fun _ ->
-    Directory.ensure buildRoot
-    let tagFile = buildRoot </> ".BUILDDIR.TAG"
-    use f = System.IO.File.CreateText(tagFile)
-    f.WriteLine("build-dir: 19BBC6F7-3FBF-49BD-BAA4-EA60CE5A0735")
-    f.WriteLine("# Tag for `restic`")
-
 let srcDir = buildRoot </> "source"
 
-Target.create "Clean" <| fun _ ->
+let cleanTask = BuildTask.createFn "Clean" [] <| fun _ ->
     let extensions = [".oldest"; ".older"; ".old"; ""]
     extensions
     |> Seq.pairwise
@@ -39,7 +39,14 @@ Target.create "Clean" <| fun _ ->
                 Trace.logfn "# rename %s -> %s" srcDir dstDir
                 System.IO.Directory.Move(srcDir, dstDir))
 
-Target.create "Source" <| fun _ ->
+let ensureBuildRootTask = BuildTask.createFn "EnsureBuildRoot" [cleanTask.IfNeeded] <| fun _ ->
+    Directory.ensure buildRoot
+    let tagFile = buildRoot </> ".BUILDDIR.TAG"
+    use f = System.IO.File.CreateText(tagFile)
+    f.WriteLine("build-dir: 19BBC6F7-3FBF-49BD-BAA4-EA60CE5A0735")
+    f.WriteLine("# Tag for `restic`")
+
+let sourceTask = BuildTask.createFn "Source" [cleanTask; ensureBuildRootTask] <| fun _ ->
     srcDir |> Directory.ensure
     CmdLine.empty
     |> CmdLine.append "source"
@@ -51,15 +58,19 @@ Target.create "Source" <| fun _ ->
     |> Proc.run
     |> ignore
 
-"Clean"
-    ==> "EnsureBuildRoot"
-    ==> "Source"
+type ConanTasks =
+    { Install: BuildTask.TaskInfo
+      Build: BuildTask.TaskInfo
+      Package: BuildTask.TaskInfo
+      Export: BuildTask.TaskInfo
+      Test: BuildTask.TaskInfo
+      Create: BuildTask.TaskInfo }
 
-let createTargets prof =
+let createTargets prof: ConanTasks =
     let targetName x = sprintf "%s-%s" x prof
     let buildDir = buildRoot </> (sprintf "build-%s" prof)
     let packageDir = buildRoot </> (sprintf "package-%s" prof)
-    Target.create (targetName "Install") <| fun _ ->
+    let installTask = BuildTask.createFn ("Install" |> targetName) [sourceTask] <| fun _ ->
         buildDir |> Directory.ensure
         CmdLine.empty
         |> CmdLine.append "install"
@@ -72,7 +83,7 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    Target.create (targetName "Build") <| fun _ ->
+    let buildTask = BuildTask.createFn ("Build" |> targetName) [installTask] <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "build"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -84,7 +95,7 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    Target.create (targetName "Package") <| fun _ ->
+    let packageTask = BuildTask.createFn ("Package" |> targetName) [buildTask] <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "package"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -97,7 +108,7 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    Target.create (targetName "Export") <| fun _ ->
+    let exportTask = BuildTask.createFn (targetName "Export") [packageTask] <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "export-pkg"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -111,7 +122,7 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    Target.create (targetName "Test") <| fun _ ->
+    let testTask = BuildTask.createFn ("Test" |> targetName) [exportTask] <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "test"
         |> CmdLine.append (__SOURCE_DIRECTORY__ </> "test_package")
@@ -123,7 +134,7 @@ let createTargets prof =
         |> Proc.run
         |> ignore
 
-    Target.create (targetName "Create") <| fun _ ->
+    let createTask = BuildTask.createFn ("Create" |> targetName) [testTask] <| fun _ ->
         CmdLine.empty
         |> CmdLine.append "create"
         |> CmdLine.append __SOURCE_DIRECTORY__
@@ -134,23 +145,20 @@ let createTargets prof =
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
+    { Install = installTask
+      Build = buildTask
+      Package = packageTask
+      Export = exportTask
+      Test = testTask
+      Create = createTask }
 
-    "Source"
-        ==> (targetName "Install")
-        ==> (targetName "Build")
-        ==> (targetName "Package")
-        ==> (targetName "Export")
-        ==> (targetName "Test") |> ignore
-    (targetName "Export") ==> "Export" |> ignore
-    (targetName "Test") ==> "Test" |> ignore
-    (targetName "Create") ==> "Create" |> ignore
+let targetDefault = createTargets "default"
+let targetClang9 = createTargets "clang-9"
+let targetGcc9 = createTargets "gcc-9"
 
-Target.create "Export" ignore
-Target.create "Test" ignore
-Target.create "Create" ignore
+let exportTask = BuildTask.createEmpty "Export" [targetDefault.Export; targetClang9.Export; targetGcc9.Export]
+let testTask = BuildTask.createEmpty "Test" [targetDefault.Test; targetClang9.Test; targetGcc9.Test]
+let createTask = BuildTask.createEmpty "Create" [targetDefault.Create; targetClang9.Create; targetGcc9.Create]
 
-createTargets "default"
-createTargets "clang-9"
-createTargets "gcc-9"
+BuildTask.runOrList()
 
-Target.runOrList()

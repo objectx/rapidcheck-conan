@@ -1,8 +1,0 @@
-group Fake
-    version 5.216.0
-    source https://api.nuget.org/v3/index.json
-    storage: none
-
-    nuget FSharp.Core ~> 4 prerelease
-    nuget Fake.Core.Target ~> 5 prerelease
-    nuget Blackfox.CommandLine ~> 1 prerelease
