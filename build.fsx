@@ -1,199 +1,262 @@
 #r "paket:
-    nuget FSharp.Core ~> 4 prerelease
+    nuget FSharp.Core ~> 5 prerelease
     nuget Fake.Core.Target ~> 5 prerelease
-    nuget BlackFox.CommandLine ~> 1 prerelease
-    nuget BlackFox.Fake.BuildTask
-//"
+    nuget Fake.IO.FileSystem ~> 5 prerelease
+    nuget BlackFox.CommandLine ~> 1 prerelease //"
 
 #if !FAKE
 #load ".fake/build.fsx/intellisense.fsx"
 #endif
 
+open BlackFox.CommandLine
 open Fake.Core
 open Fake.Core.TargetOperators
 open Fake.IO
 open Fake.IO.FileSystemOperators
-open Fake.IO.Globbing.Operators
-open BlackFox.CommandLine
-open BlackFox.Fake
+open System.Runtime.InteropServices
 
 Target.initEnvironment ()
 
-let buildRoot = __SOURCE_DIRECTORY__ </> "00.BUILD"
-let srcDir = buildRoot </> "source"
+// let profile = "clang-11"
+// let profile = "vs2019-preview"
 
-let cleanTask =
-    BuildTask.createFn "Clean" []
-    <| fun _ ->
-        let extensions = [ ".oldest"; ".older"; ".old"; "" ]
-        extensions
-        |> Seq.pairwise
-        |> Seq.iter (fun (dst, src) ->
-            let dstDir = buildRoot + dst
-            let srcDir = buildRoot + src
-            if System.IO.Directory.Exists(dstDir) then
-                Trace.logfn "# delete %s" dstDir
-                dstDir |> Directory.delete
-            if System.IO.Directory.Exists(srcDir) then
-                Trace.logfn "# rename %s -> %s" srcDir dstDir
-                System.IO.Directory.Move(srcDir, dstDir))
+let workingDir = __SOURCE_DIRECTORY__ </> "tmp"
 
-let ensureBuildRootTask =
-    BuildTask.createFn "EnsureBuildRoot" [ cleanTask.IfNeeded ]
-    <| fun _ ->
-        Directory.ensure buildRoot
-        let tagFile = buildRoot </> ".BUILDDIR.TAG"
-        use f = System.IO.File.CreateText(tagFile)
-        f.WriteLine("build-dir: 19BBC6F7-3FBF-49BD-BAA4-EA60CE5A0735")
-        f.WriteLine("# Tag for `restic`")
+module BuildEnv =
+    type BuildType =
+        | Debug
+        | Release
+        member self.AsString =
+            match self with
+            | Debug -> "Debug"
+            | Release -> "Release"
+    type Flavor =
+        { Profile: string
+          Type: BuildType }
 
-let sourceTask =
-    BuildTask.createFn "Source" [ cleanTask; ensureBuildRootTask ]
+    let makeFolderName (pfx: string) (flavor: Flavor) =
+        workingDir </> (sprintf "%s.%s-%s" pfx flavor.Profile flavor.Type.AsString)
+    let buildFolder (flavor: Flavor): string =
+        makeFolderName "Build" flavor
+    let packageFolder (flavor: Flavor): string =
+        makeFolderName "Package" flavor
+    let taskName (pfx: string) (flavor: Flavor): string = sprintf "%s.%s-%s" pfx flavor.Profile flavor.Type.AsString
+
+    let toSetting (flavor: Flavor) (c: CmdLine): CmdLine =
+        c
+        |> CmdLine.appendPrefix "--profile" flavor.Profile
+        |> CmdLine.appendPrefix "--settings" (sprintf "build_type=%s" flavor.Type.AsString)
+
+    let buildTypes = [| Debug; Release |]
+    let profiles =
+        if RuntimeInformation.IsOSPlatform OSPlatform.OSX then
+            [| "default"; "clang-11"; "gcc-10" |]
+        elif RuntimeInformation.IsOSPlatform OSPlatform.Linux then
+            [| "default" |]
+        elif RuntimeInformation.IsOSPlatform OSPlatform.Windows then
+            [| "vs2019-preview" |]
+        else
+            failwith "unknown host platform"
+
+    let flavors =
+        Seq.allPairs profiles buildTypes
+        |> Seq.map (fun (p, t) -> { Profile = p; Type = t })
+//let buildTypes = [|"Debug"|]
+
+Target.create "Rebuild" ignore
+
+Target.create "Clean"
+<| fun _ -> Shell.rm_rf workingDir
+
+"Clean" ==> "Rebuild"
+
+Target.create "EnsureWorkingDir"
+<| fun _ -> Directory.ensure workingDir
+
+"Clean" ?=> "EnsureWorkingDir"
+
+Target.create "Source"
+<| fun _ ->
+    let srcDir = workingDir </> "source"
+    Shell.rm_rf srcDir
+    CmdLine.empty
+    |> CmdLine.append "source"
+    |> CmdLine.append __SOURCE_DIRECTORY__
+    |> CmdLine.appendPrefix "--source-folder" srcDir
+    |> CmdLine.toArray
+    |> CreateProcess.fromRawCommand "conan"
+    |> CreateProcess.ensureExitCode
+    |> Proc.run
+    |> ignore
+
+"EnsureWorkingDir" ==> "Source"
+
+Target.create "Install" ignore
+
+let installTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Install"
+    let installDir = flavor |> BuildEnv.buildFolder
+
+    Target.create taskName
     <| fun _ ->
-        srcDir |> Directory.ensure
         CmdLine.empty
-        |> CmdLine.append "source"
+        |> CmdLine.append "install"
         |> CmdLine.append __SOURCE_DIRECTORY__
-        |> CmdLine.appendPrefix "--source-folder" srcDir
+        |> CmdLine.appendPrefix "--install-folder" installDir
+        // |> CmdLine.appendPrefix "--build" "fmt"
+        |> BuildEnv.toSetting flavor
         |> CmdLine.toArray
         |> CreateProcess.fromRawCommand "conan"
         |> CreateProcess.ensureExitCode
         |> Proc.run
         |> ignore
 
-type ConanTasks =
-    { Install: BuildTask.TaskInfo
-      Build: BuildTask.TaskInfo
-      Package: BuildTask.TaskInfo
-      Export: BuildTask.TaskInfo
-      Test: BuildTask.TaskInfo
-      Create: BuildTask.TaskInfo }
+    "Source" ?=> taskName |> ignore
+    taskName ==> "Install" |> ignore
 
-let createTargets prof: ConanTasks =
-    let targetName x = sprintf "%s.%s" x prof
-    let buildDir = buildRoot </> (sprintf "build-%s" prof)
+BuildEnv.flavors |> Seq.iter installTask
 
-    let packageDir =
-        buildRoot </> (sprintf "package-%s" prof)
+Target.create "Build" ignore
 
-    let installTask =
-        BuildTask.createFn ("Install" |> targetName) [ sourceTask ]
-        <| fun _ ->
-            buildDir |> Directory.ensure
-            CmdLine.empty
-            |> CmdLine.append "install"
-            |> CmdLine.append __SOURCE_DIRECTORY__
-            |> CmdLine.appendPrefix "--install-folder" buildDir
-            |> CmdLine.appendPrefix "--profile" prof
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+let buildTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Build"
+    let sourceDir = workingDir </> "source"
+    let buildDir = flavor |> BuildEnv.buildFolder
 
-    let buildTask =
-        BuildTask.createFn ("Build" |> targetName) [ installTask ]
-        <| fun _ ->
-            CmdLine.empty
-            |> CmdLine.append "build"
-            |> CmdLine.append __SOURCE_DIRECTORY__
-            |> CmdLine.appendPrefix "--source-folder" srcDir
-            |> CmdLine.appendPrefix "--build-folder" buildDir
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+    Target.create taskName
+    <| fun _ ->
+        CmdLine.empty
+        |> CmdLine.append "build"
+        |> CmdLine.append __SOURCE_DIRECTORY__
+        |> CmdLine.appendPrefix "--source-folder" sourceDir
+        |> CmdLine.appendPrefix "--build-folder" buildDir
+        |> CmdLine.toArray
+        |> CreateProcess.fromRawCommand "conan"
+        |> CreateProcess.ensureExitCode
+        |> Proc.run
+        |> ignore
 
-    let packageTask =
-        BuildTask.createFn ("Package" |> targetName) [ buildTask ]
-        <| fun _ ->
-            CmdLine.empty
-            |> CmdLine.append "package"
-            |> CmdLine.append __SOURCE_DIRECTORY__
-            |> CmdLine.appendPrefix "--source-folder" srcDir
-            |> CmdLine.appendPrefix "--build-folder" buildDir
-            |> CmdLine.appendPrefix "--package-folder" packageDir
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+    (flavor |> BuildEnv.taskName "Install")
+    ==> taskName
+    |> ignore
 
-    let exportTask =
-        BuildTask.createFn (targetName "Export") [ packageTask ]
-        <| fun _ ->
-            CmdLine.empty
-            |> CmdLine.append "export-pkg"
-            |> CmdLine.append __SOURCE_DIRECTORY__
-            |> CmdLine.append "objectx/testing"
-            |> CmdLine.appendPrefix "--source-folder" srcDir
-            |> CmdLine.appendPrefix "--build-folder" buildDir
-            |> CmdLine.append "--force"
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+    taskName ==> "Build" |> ignore
 
-    let testTask =
-        BuildTask.createFn ("Test" |> targetName) [ exportTask ]
-        <| fun _ ->
-            CmdLine.empty
-            |> CmdLine.append "test"
-            |> CmdLine.append (__SOURCE_DIRECTORY__ </> "test_package")
-            |> CmdLine.append "rapidcheck/1.0.8@objectx/testing"
-            |> CmdLine.appendPrefix "--profile" prof
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+BuildEnv.flavors |> Seq.iter buildTask
 
-    let createTask =
-        BuildTask.createFn ("Create" |> targetName) [ testTask ]
-        <| fun _ ->
-            CmdLine.empty
-            |> CmdLine.append "create"
-            |> CmdLine.append __SOURCE_DIRECTORY__
-            |> CmdLine.append "objectx/testing"
-            |> CmdLine.appendPrefix "--profile" prof
-            |> CmdLine.toArray
-            |> CreateProcess.fromRawCommand "conan"
-            |> CreateProcess.ensureExitCode
-            |> Proc.run
-            |> ignore
+Target.create "Package" ignore
 
-    { Install = installTask
-      Build = buildTask
-      Package = packageTask
-      Export = exportTask
-      Test = testTask
-      Create = createTask }
+let packageTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Package"
+    let sourceDir = workingDir </> "source"
+    let buildDir = flavor |> BuildEnv.buildFolder
+    let packageDir = flavor |> BuildEnv.packageFolder
 
-let targetDefault = createTargets "default"
-let targetClang10 = createTargets "clang-10"
-let targetGcc9 = createTargets "gcc-10"
+    Target.create taskName
+    <| fun _ ->
+        CmdLine.empty
+        |> CmdLine.append "package"
+        |> CmdLine.append __SOURCE_DIRECTORY__
+        |> CmdLine.appendPrefix "--source-folder" sourceDir
+        |> CmdLine.appendPrefix "--build-folder" buildDir
+        |> CmdLine.appendPrefix "--package-folder" packageDir
+        |> CmdLine.toArray
+        |> CreateProcess.fromRawCommand "conan"
+        |> CreateProcess.ensureExitCode
+        |> Proc.run
+        |> ignore
 
-let exportTask =
-    BuildTask.createEmpty
-        "Export"
-        [ targetDefault.Export
-          targetClang10.Export
-          targetGcc9.Export ]
+    (flavor |> BuildEnv.taskName "Build")
+    ==> taskName
+    |> ignore
 
-let testTask =
-    BuildTask.createEmpty
-        "Test"
-        [ targetDefault.Test
-          targetClang10.Test
-          targetGcc9.Test ]
+    taskName ==> "Package" |> ignore
 
-let createTask =
-    BuildTask.createEmpty
-        "Create"
-        [ targetDefault.Create
-          targetClang10.Create
-          targetGcc9.Create ]
+BuildEnv.flavors |> Seq.iter packageTask
 
-BuildTask.runOrList ()
+Target.create "Export" ignore
+
+let exportTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Export"
+    let sourceDir = workingDir </> "source"
+    let buildDir = flavor |> BuildEnv.buildFolder
+    let packageDir = flavor |> BuildEnv.packageFolder
+
+    Target.create taskName
+    <| fun _ ->
+        CmdLine.empty
+        |> CmdLine.append "export-pkg"
+        |> CmdLine.append "--force"
+        |> CmdLine.append __SOURCE_DIRECTORY__
+        |> CmdLine.append "objectx/testing"
+        // |> CmdLine.appendPrefix "--source-folder" sourceDir
+        // |> CmdLine.appendPrefix "--build-folder" buildDir
+        |> CmdLine.appendPrefix "--package-folder" packageDir
+        |> BuildEnv.toSetting flavor
+        |> CmdLine.toArray
+        |> CreateProcess.fromRawCommand "conan"
+        |> CreateProcess.ensureExitCode
+        |> Proc.run
+        |> ignore
+
+    (flavor |> BuildEnv.taskName "Package")
+    ==> taskName
+    |> ignore
+
+    taskName ==> "Export" |> ignore
+
+BuildEnv.flavors |> Seq.iter exportTask
+
+Target.create "Test" ignore
+
+let testTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Test"
+
+    Target.create taskName
+    <| fun _ ->
+        CmdLine.empty
+        |> CmdLine.append "test"
+        |> CmdLine.append "test_package"
+        |> CmdLine.append "rapidcheck/1.0.9@objectx/testing"
+        |> BuildEnv.toSetting flavor
+        |> CmdLine.toArray
+        |> CreateProcess.fromRawCommand "conan"
+        |> CreateProcess.ensureExitCode
+        |> Proc.run
+        |> ignore
+
+    (flavor |> BuildEnv.taskName "Export")
+    ==> taskName
+    |> ignore
+
+    taskName ==> "Test" |> ignore
+
+BuildEnv.flavors |> Seq.iter testTask
+
+Target.create "Create" ignore
+
+let createTask (flavor: BuildEnv.Flavor) =
+    let taskName = flavor |> BuildEnv.taskName "Create"
+
+    Target.create taskName
+    <| fun _ ->
+        CmdLine.empty
+        |> CmdLine.append "create"
+        |> CmdLine.append __SOURCE_DIRECTORY__
+        |> CmdLine.append "objectx/testing"
+        |> BuildEnv.toSetting flavor
+        |> CmdLine.toArray
+        |> CreateProcess.fromRawCommand "conan"
+        |> CreateProcess.ensureExitCode
+        |> Proc.run
+        |> ignore
+
+    taskName ==> "Create" |> ignore
+// "Test" ==> "Create" |> ignore
+
+BuildEnv.flavors |> Seq.iter createTask
+"Source" ==> "Rebuild"
+"Test" ==> "Rebuild"
+// "Create" ==> "Rebuild"
+
+Target.runOrDefaultWithArguments "Rebuild"

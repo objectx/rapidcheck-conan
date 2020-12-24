@@ -1,77 +1,83 @@
 from conans import ConanFile, CMake, tools
-import sys
+from conans.errors import ConanInvalidConfiguration
+import sys, os
+
 
 class RapidcheckConan(ConanFile):
     name = "rapidcheck"
-    version = "1.0.8"
-    license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
-    url = "https://github.com/objectx/rapidcheck-conan"
     description = "Please visit https://github.com/emil-e/rapidcheck"
+    version = "1.0.9"
+    url = "https://github.com/objectx/rapidcheck-conan"
+    homepage = "http://github.com/emil-e/rapidcheck"
+    topics = ("conan", "rapidcheck", "testing", "property-based-testing", "quickcheck")
+    license = "https://github.com/emil-e/rapidcheck/blob/master/LICENSE.md"
+    exports_sources = ["CMakeLists.txt"]
+    generators = "cmake", "cmake_find_package"
     settings = "os", "compiler", "build_type", "arch"
-    options = {"shared": [True, False],
-               "enable_rtti": [True, False],
-               "enable_all_extras": [True, False],
-               "enable_catch": [True, False],
-               "enable_gmock": [True, False],
-               "enable_gtest": [True, False],
-               "enable_boost": [True, False],
-               "enable_boost_test": [True, False]}
-    default_options = {"shared" : False,
-                       "enable_rtti": True,
-                       "enable_all_extras": False,
-                       "enable_catch": False,
-                       "enable_gmock": False,
-                       "enable_gtest": False,
-                       "enable_boost": False,
-                       "enable_boost_test": False}
-    generators = "cmake"
+    options = {
+        "shared": [True, False],
+        "fPIC": [True, False],
+        "enable_rtti": [True, False],
+    }
+    default_options = {
+        "shared": False,
+        "fPIC": True,
+        "enable_rtti": True,
+    }
+
+    _cmake = None
+
+    @property
+    def _source_subfolder(self):
+        return "source_subfolder"
+
+    def config_options(self):
+        if self.settings.os == "Windows":
+            del self.options.fPIC
+
+    def configure(self):
+        pass
+
+    def requirements(self):
+        pass
 
     def source(self):
         self.run("git clone https://github.com/emil-e/rapidcheck.git")
-        self.run("cd rapidcheck && git checkout --detach 7bc7d302191a4f3d0bf005692677126136e02f60")
-        # This small hack might be useful to guarantee proper /MT /MD linkage in MSVC
-        # if the packaged project doesn't have variables to set it properly
-        tools.replace_in_file("rapidcheck/CMakeLists.txt", "project(rapidcheck CXX)", '''project(rapidcheck CXX)
-include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-conan_basic_setup()''')
+        self.run(
+            "cd rapidcheck && git checkout --detach b78f89288c7e086d06e2a1e10b605d8375517a8a"
+        )
+        os.rename("rapidcheck", self._source_subfolder)
+
+    def _configure_cmake(self):
+        if self._cmake:
+            return self._cmake
+        self._cmake = CMake(self)
+        self._cmake.definitions["RC_INSTALL_ALL_EXTRAS"] = True
+        self._cmake.definitions["RC_ENABLE_RTTI"] = not self.options.enable_rtti
+        self._cmake.configure()
+        return self._cmake
+
+    def _disable_werror(self):
+        tools.replace_in_file(
+            os.path.join(self._source_subfolder, "cmake", "utils.cmake"), "/WX", ""
+        )
 
     def build(self):
-        cmake = CMake(self)
-        defs = dict()
-        if self.options.enable_all_extras:
-            defs["RC_INSTALL_ALL_EXTRAS"] = "YES"
-        else:
-            if self.options.enable_catch:
-                defs["RC_ENABLE_CATCH"] = "YES"
-            if self.options.enable_gmock:
-                defs["RC_ENABLE_GMOCK"] = "YES"
-            if self.options.enable_gtest:
-                defs["RC_ENABLE_GTEST"] = "YES"
-            if self.options.enable_boost:
-                defs["RC_ENABLE_BOOST"] = "YES"
-            if self.options.enable_boost_test:
-                defs["RC_ENABLE_BOOST_TEST"] = "YES"
-        if self.options.enable_rtti:
-            defs["RC_ENABLE_RTTI"] = "YES"
-        cmake.configure(source_folder="rapidcheck", defs=defs)
+        cmake = self._configure_cmake()
         cmake.build()
 
     def package(self):
-        self.copy("LICENSE*", dst="licenses", src="rapidcheck")
-        self.copy("*.h", dst="include", src="rapidcheck/include")
-        self.copy("*.hpp", dst="include", src="rapidcheck/include")
-        for e in ["catch", "gmock", "gtest", "boost", "boost_test"]:
-            f = f"rapidcheck/extras/{e}/include"
-            print("f =", f, file=sys.stderr)
-            self.copy("*.h", dst="include", src=f)
-            self.copy("*.hpp", dst="include", src=f)
-        self.copy("*rapidcheck.lib", dst="lib", keep_path=False)
-        self.copy("*.dll", dst="bin", keep_path=False)
-        self.copy("*.so", dst="lib", keep_path=False)
-        self.copy("*.dylib", dst="lib", keep_path=False)
-        self.copy("*.a", dst="lib", keep_path=False)
+        self.copy("LICENSE*", dst="licenses", src=self._source_subfolder)
+        cmake = self._configure_cmake()
+        cmake.install()
+        tools.rmdir (os.path.join(self.package_folder, "share"))
+
+    def package_id(self):
+        pass
 
     def package_info(self):
-        self.cpp_info.libs = tools.collect_libs(self)
-        if self.options.enable_rtti:
-            self.cpp_info.defines.append ("RC_USE_RTTI=1")
+        component_name = "librapidcheck"
+        self.cpp_info.components[component_name].libs = tools.collect_libs(self)
+
+        if not self.options.enable_rtti:
+            self.cpp_info.components[component_name].defines.append("RC_DONT_USE_RTTI=1")
